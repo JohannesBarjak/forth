@@ -1,0 +1,42 @@
+cabal-version:      2.4
+name:               forth
+version:            0.1.0.0
+
+-- A short (one-line) description of the package.
+-- synopsis:
+
+-- A longer description of the package.
+-- description:
+
+-- A URL where users can report bugs.
+-- bug-reports:
+
+-- The license under which the package is released.
+-- license:
+author:             johannes
+maintainer:         johannesbarja@protonmail.com
+
+-- A copyright notice.
+-- copyright:
+-- category:
+extra-source-files: CHANGELOG.md
+
+executable forth
+    main-is:          Main.hs
+
+    -- Modules included in this executable, other than Main.
+    -- other-modules:
+
+    -- LANGUAGE extensions used by modules in this package.
+    -- other-extensions:
+    build-depends:    base        ^>=4.14.3.0
+                    , relude      ^>=1.0.0.1
+                    , containers  ^>=0.6.5.1
+                    , transformers^>=0.5.6.2
+    ghc-options: -Wall
+    hs-source-dirs:   app
+    mixins: base hiding (Prelude)
+          , relude (Relude as Prelude)
+          , relude
+    default-extensions: OverloadedStrings LambdaCase
+    default-language:
