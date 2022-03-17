@@ -6,14 +6,19 @@ import System.IO (putChar)
 import Control.Monad.Trans.Except (throwE)
 
 main :: IO ()
-main = repl initWords []
+main = getArgs >>= (maybeAt 0 >>> \case
+        Just filename -> do
+            file <- readFileText filename
+            runExceptT (interpret (words file) initWords [])
+                >>= either putTextLn (const $ pure ())
+        Nothing       -> repl initWords [])
 
 type Stack = [Int]
 type Def   = [ForthVls]
 
 data ForthVls
-    = Fun   (ExceptT String (State Stack) ())
-    | IOFun (ExceptT String (State Stack) (IO ()))
+    = Fun   (ExceptT Text (State Stack) ())
+    | IOFun (ExceptT Text (State Stack) (IO ()))
     | Num   Int
 
 type Env = Map Text Def
@@ -32,10 +37,10 @@ repl env s = do
     input <- getLine
 
     runExceptT (interpret (words input) env s) >>= \case
-        Left  err      -> putStrLn err >> repl env s
+        Left  err      -> putTextLn err >> repl env s
         Right (ns, ne) -> print ns     >> repl ne ns
 
-interpret :: [Text] -> Env -> Stack -> ExceptT String IO (Stack, Env)
+interpret :: [Text] -> Env -> Stack -> ExceptT Text IO (Stack, Env)
 interpret []          env s = pure (s, env)
 interpret (":":";":_) _   _ = throwE "Empty Definition"
 
@@ -46,76 +51,75 @@ interpret (":":w:ws)  env s = do
 
 interpret (w:ws)      env s = run w env s >>= interpret ws env
 
-toDef :: [Text] -> Env -> Either String Def
+toDef :: [Text] -> Env -> Either Text Def
 toDef []     _   = Right []
 toDef (w:ws) env = case Map.lookup w env of
         Just def -> (def ++) <$> toDef ws env
         Nothing  -> ((:) . Num) `appIfNum` w <*> toDef ws env
 
-run :: Text -> Env -> Stack -> ExceptT String IO Stack
+run :: Text -> Env -> Stack -> ExceptT Text IO Stack
 run word env s = case Map.lookup word env of
     Just def -> run' def s
     Nothing  -> hoistEither $ (:s) `appIfNum` word
 
-run' :: Def -> Stack -> ExceptT String IO Stack
+run' :: Def -> Stack -> ExceptT Text IO Stack
 run' []           s = pure s
-run' (Fun   f:ds) s = do
-    let (err, ns) = runExceptT f `runState` s
-    hoistEither err
-    run' ds ns
+run' (Fun   f:ds) s = err >> run' ds ns
+    where (err, ns) = apply f s
 
-run' (IOFun f:ds) s = do
-    let (io, ns) = runExceptT f `runState` s
-    liftIO =<< hoistEither io
-    run' ds ns
+run' (IOFun f:ds) s = (liftIO =<< io) >> run' ds ns
+    where (io, ns) = apply f s
 
 run' (Num   n:ds) s = run' ds (n:s)
 
-add :: ExceptT String (State Stack) ()
+add :: ExceptT Text (State Stack) ()
 add = do
     (n0, n1) <- pop2
     stackAdd [n1 + n0]
 
-sub :: ExceptT String (State Stack) ()
+sub :: ExceptT Text (State Stack) ()
 sub = do
     (n0, n1) <- pop2
     stackAdd [n1 - n0]
 
-emit :: ExceptT String (State Stack) (IO ())
+emit :: ExceptT Text (State Stack) (IO ())
 emit = putChar . chr <$> pop
 
-swap :: ExceptT String (State Stack) ()
+swap :: ExceptT Text (State Stack) ()
 swap = do
     (n0, n1) <- pop2
     stackAdd [n1, n0]
 
-dup :: ExceptT String (State Stack) ()
+dup :: ExceptT Text (State Stack) ()
 dup = do
     n <- pop
     stackAdd [n, n]
 
-drop :: ExceptT String (State Stack) ()
+drop :: ExceptT Text (State Stack) ()
 drop = do
     _ <- pop
     pure ()
 
-rot :: ExceptT String (State Stack) ()
+rot :: ExceptT Text (State Stack) ()
 rot = do
     n0       <- pop
     (n1, n2) <- pop2
 
     stackAdd [n1, n2, n0]
 
-stackAdd :: Stack -> ExceptT String (State Stack) ()
-stackAdd n = modify $ \ns -> n ++ ns
+apply :: ExceptT Text (State Stack) a -> Stack -> (ExceptT Text IO a, Stack)
+apply f s = first hoistEither (runExceptT f `runState` s)
 
-pop2 :: ExceptT String (State Stack) (Int, Int)
+stackAdd :: Stack -> ExceptT Text (State Stack) ()
+stackAdd = modify . (++)
+
+pop2 :: ExceptT Text (State Stack) (Int, Int)
 pop2 = liftA2 (,) pop pop
 
-pop :: ExceptT String (State Stack) Int
+pop :: ExceptT Text (State Stack) Int
 pop = get >>= \case
     []    -> throwE "Stack Underflow"
     (_:_) -> state $ \(x:xs) -> (x, xs)
 
-appIfNum :: (Int -> b) -> Text -> Either String b
-appIfNum f w = either (const (Left "Undefined Word")) (Right . f . fst) $ decimal w
+appIfNum :: (Int -> b) -> Text -> Either Text b
+appIfNum f w = either (const $ Left "?") (Right . f . fst) $ decimal w
