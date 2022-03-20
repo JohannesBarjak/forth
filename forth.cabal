@@ -31,6 +31,7 @@ executable forth
     -- other-extensions:
     build-depends:    base        ^>=4.14.3.0
                     , relude      ^>=1.0.0.1
+                    , vector      ^>=0.12.3.1
                     , containers  ^>=0.6.5.1
                     , transformers^>=0.5.6.2
     ghc-options: -Wall
@@ -38,5 +39,5 @@ executable forth
     mixins: base hiding (Prelude)
           , relude (Relude as Prelude)
           , relude
-    default-extensions: OverloadedStrings LambdaCase
+    default-extensions: OverloadedStrings OverloadedLists LambdaCase
     default-language:

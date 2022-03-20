@@ -5,16 +5,19 @@ import qualified Data.Map as Map
 import System.IO (putChar)
 import Control.Monad.Trans.Except (throwE)
 
+import Data.Vector as V (Vector, cons, uncons)
+
 main :: IO ()
-main = getArgs >>= (maybeAt 0 >>> \case
+main = getArgs >>= \case
         Just filename -> do
             file <- readFileText filename
             runExceptT (interpret (words file) initWords [])
                 >>= either putTextLn (const $ pure ())
-        Nothing       -> repl initWords [])
+        Nothing       -> repl initWords []
+        . maybeAt 0
 
 type Stack = [Int]
-type Def   = [ForthVls]
+type Def   = Vector ForthVls
 
 data ForthVls
     = Fun   (ExceptT Text (State Stack) ())
@@ -38,7 +41,7 @@ repl env s = do
 
     runExceptT (interpret (words input) env s) >>= \case
         Left  err      -> putTextLn err >> repl env s
-        Right (ns, ne) -> print ns     >> repl ne ns
+        Right (ns, ne) -> print ns      >> repl ne ns
 
 interpret :: [Text] -> Env -> Stack -> ExceptT Text IO (Stack, Env)
 interpret []          env s = pure (s, env)
@@ -47,15 +50,15 @@ interpret (":":";":_) _   _ = throwE "Empty Definition"
 interpret (":":w:ws)  env s = do
     def <- hoistEither $ toDef ds env
     interpret rs (Map.insert w def env) s
-        where (ds, _:rs) = span (/= ";") ws
+    where (ds, _:rs) = span (/= ";") ws
 
 interpret (w:ws)      env s = run w env s >>= interpret ws env
 
 toDef :: [Text] -> Env -> Either Text Def
-toDef []     _   = Right []
+toDef []     _   = Right empty
 toDef (w:ws) env = case Map.lookup w env of
-        Just def -> (def ++) <$> toDef ws env
-        Nothing  -> ((:) . Num) `appIfNum` w <*> toDef ws env
+        Just def -> (def <>) <$> toDef ws env
+        Nothing  -> (cons . Num) `appIfNum` w <*> toDef ws env
 
 run :: Text -> Env -> Stack -> ExceptT Text IO Stack
 run word env s = case Map.lookup word env of
@@ -63,14 +66,11 @@ run word env s = case Map.lookup word env of
     Nothing  -> hoistEither $ (:s) `appIfNum` word
 
 run' :: Def -> Stack -> ExceptT Text IO Stack
-run' []           s = pure s
-run' (Fun   f:ds) s = err >> run' ds ns
-    where (err, ns) = apply f s
-
-run' (IOFun f:ds) s = (liftIO =<< io) >> run' ds ns
-    where (io, ns) = apply f s
-
-run' (Num   n:ds) s = run' ds (n:s)
+run' ds s = V.uncons ds & maybe (pure s)
+    (\ (v, vs) -> case v of
+        (Fun f)   -> let (eff, ns) = apply f s in eff              >> run' vs ns
+        (IOFun f) -> let (eff, ns) = apply f s in (eff >>= liftIO) >> run' vs ns
+        (Num n)   -> run' vs (n:s))
 
 add :: ExceptT Text (State Stack) ()
 add = do
@@ -108,7 +108,7 @@ rot = do
     stackAdd [n1, n2, n0]
 
 apply :: ExceptT Text (State Stack) a -> Stack -> (ExceptT Text IO a, Stack)
-apply f s = first hoistEither (runExceptT f `runState` s)
+apply f s = first hoistEither $ runExceptT f `runState` s
 
 stackAdd :: Stack -> ExceptT Text (State Stack) ()
 stackAdd = modify . (++)
@@ -118,8 +118,8 @@ pop2 = liftA2 (,) pop pop
 
 pop :: ExceptT Text (State Stack) Int
 pop = get >>= \case
-    []    -> throwE "Stack Underflow"
-    (_:_) -> state $ \(x:xs) -> (x, xs)
+    [] -> throwE "Stack Underflow"
+    _  -> state $ \(x:xs) -> (x, xs)
 
 appIfNum :: (Int -> b) -> Text -> Either Text b
 appIfNum f w = either (const $ Left "?") (Right . f . fst) $ decimal w
