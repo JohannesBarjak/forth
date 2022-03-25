@@ -1,7 +1,8 @@
+{-# LANGUAGE ViewPatterns #-}
 module Main where
 
 import Data.Text.Read (decimal)
-import qualified Data.Map as Map
+import qualified Data.Map as M
 import System.IO (putChar)
 import Control.Monad.Trans.Except (throwE)
 
@@ -27,11 +28,10 @@ data ForthVls
 type Env = Map Text Def
 
 initWords :: Env
-initWords = fromList
-    [("+",   [Fun   add]),       ("-",   [Fun sub]),
-    ("emit", [IOFun emit]),
-    ("swap", [Fun   Main.swap]), ("dup", [Fun dup]),
-    ("drop", [Fun   Main.drop]), ("rot", [Fun rot])]
+initWords = [("+",   [Fun    add]),       ("-",   [Fun sub]),
+             ("emit", [IOFun emit]),
+             ("swap", [Fun   Main.swap]), ("dup", [Fun dup]),
+             ("drop", [Fun   Main.drop]), ("rot", [Fun rot])]
 
 repl :: Env -> Stack -> IO ()
 repl env s = do
@@ -49,38 +49,36 @@ interpret (":":";":_) _   _ = throwE "Empty Definition"
 
 interpret (":":w:ws)  env s = do
     def <- hoistEither $ toDef ds env
-    interpret rs (Map.insert w def env) s
+    interpret rs (M.insert w def env) s
     where (ds, _:rs) = span (/= ";") ws
 
 interpret (w:ws)      env s = run w env s >>= interpret ws env
 
 toDef :: [Text] -> Env -> Either Text Def
-toDef []     _   = Right empty
-toDef (w:ws) env = case Map.lookup w env of
-        Just def -> (def <>) <$> toDef ws env
-        Nothing  -> (cons . Num) `appIfNum` w <*> toDef ws env
+toDef []     _                              = Right empty
+toDef (w:ws) env @ (M.lookup w -> Just def) = (def <>) <$> toDef ws env
+toDef (w:ws) env                            = (cons . Num) `appIfNum` w <*> toDef ws env
 
 run :: Text -> Env -> Stack -> ExceptT Text IO Stack
-run word env s = case Map.lookup word env of
-    Just def -> run' def s
-    Nothing  -> hoistEither $ (:s) `appIfNum` word
+run word (M.lookup word -> Just def) s = run' def s
+run word _                           s = hoistEither $ (:s) `appIfNum` word
 
 run' :: Def -> Stack -> ExceptT Text IO Stack
-run' ds s = V.uncons ds & maybe (pure s)
-    (\ (v, vs) -> case v of
+run' (V.uncons -> Just (v, vs)) s = case v of
         (Fun f)   -> let (eff, ns) = apply f s in eff              >> run' vs ns
         (IOFun f) -> let (eff, ns) = apply f s in (eff >>= liftIO) >> run' vs ns
-        (Num n)   -> run' vs (n:s))
+        (Num n)   -> run' vs (n:s)
+run' _                          s = pure s
 
 add :: ExceptT Text (State Stack) ()
 add = do
     (n0, n1) <- pop2
-    stackAdd [n1 + n0]
+    push [n1 + n0]
 
 sub :: ExceptT Text (State Stack) ()
 sub = do
     (n0, n1) <- pop2
-    stackAdd [n1 - n0]
+    push [n1 - n0]
 
 emit :: ExceptT Text (State Stack) (IO ())
 emit = putChar . chr <$> pop
@@ -88,12 +86,12 @@ emit = putChar . chr <$> pop
 swap :: ExceptT Text (State Stack) ()
 swap = do
     (n0, n1) <- pop2
-    stackAdd [n1, n0]
+    push [n1, n0]
 
 dup :: ExceptT Text (State Stack) ()
 dup = do
     n <- pop
-    stackAdd [n, n]
+    push [n, n]
 
 drop :: ExceptT Text (State Stack) ()
 drop = do
@@ -105,13 +103,13 @@ rot = do
     n0       <- pop
     (n1, n2) <- pop2
 
-    stackAdd [n1, n2, n0]
+    push [n1, n2, n0]
 
 apply :: ExceptT Text (State Stack) a -> Stack -> (ExceptT Text IO a, Stack)
 apply f s = first hoistEither $ runExceptT f `runState` s
 
-stackAdd :: Stack -> ExceptT Text (State Stack) ()
-stackAdd = modify . (++)
+push :: Stack -> ExceptT Text (State Stack) ()
+push = modify . (++)
 
 pop2 :: ExceptT Text (State Stack) (Int, Int)
 pop2 = liftA2 (,) pop pop
