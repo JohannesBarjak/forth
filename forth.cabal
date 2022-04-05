@@ -25,19 +25,20 @@ executable forth
     main-is:          Main.hs
 
     -- Modules included in this executable, other than Main.
-    -- other-modules:
+    other-modules: Ast Interpreter Parser
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:    base        ^>=4.14.3.0
-                    , relude      ^>=1.0.0.1
-                    , vector      ^>=0.12.3.1
                     , containers  ^>=0.6.5.1
+                    , megaparsec  ^>=9.2.0
+                    , relude      ^>=1.0.0.1
                     , transformers^>=0.5.6.2
+                    , vector      ^>=0.12.3.1
     ghc-options: -Wall
     hs-source-dirs:   app
     mixins: base hiding (Prelude)
           , relude (Relude as Prelude)
           , relude
-    default-extensions: OverloadedStrings OverloadedLists LambdaCase
-    default-language:
+    default-extensions: OverloadedStrings LambdaCase ImportQualifiedPost
+    default-language: Haskell2010
